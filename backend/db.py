@@ -63,7 +63,20 @@ class Store:
             return cur.fetchone()
 
     def history(self, start, end, table):
-        """Return rows (ts, leg1_a, leg2_a) from raw readings or an aggregate view."""
+        """Return rows (ts, leg1_a, leg2_a) from raw readings or an aggregate view.
+
+        Falls back to raw readings if the aggregate view is missing (e.g. a
+        dev database created via ensure_schema instead of db/init.sql).
+        """
+        try:
+            return self._history_from(start, end, table)
+        except Exception:  # noqa: BLE001
+            if table == "readings":
+                raise
+            log.warning("aggregate %s unavailable, falling back to raw", table)
+            return self._history_from(start, end, "readings")
+
+    def _history_from(self, start, end, table):
         with self.conn.cursor() as cur:
             if table == "readings":
                 cur.execute(

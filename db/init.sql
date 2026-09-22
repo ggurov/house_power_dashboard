@@ -30,31 +30,32 @@ FROM readings
 GROUP BY bucket, host
 WITH NO DATA;
 
--- 1-hour aggregates rolled up from the minute view.
+-- 1-hour aggregates, straight from raw (nested CAGG rollups are fragile
+-- across versions; at ~1 row/s the raw scan is cheap).
 CREATE MATERIALIZED VIEW IF NOT EXISTS power_1hour
 WITH (timescaledb.continuous) AS
-SELECT time_bucket('1 hour', bucket) AS bucket,
+SELECT time_bucket('1 hour', ts) AS bucket,
        host,
-       AVG(leg1_a_avg) AS leg1_a_avg,
-       MAX(leg1_a_max) AS leg1_a_max,
-       AVG(leg2_a_avg) AS leg2_a_avg,
-       MAX(leg2_a_max) AS leg2_a_max,
-       SUM(samples)    AS samples
-FROM power_1min
+       AVG(leg1_a) AS leg1_a_avg,
+       MAX(leg1_a) AS leg1_a_max,
+       AVG(leg2_a) AS leg2_a_avg,
+       MAX(leg2_a) AS leg2_a_max,
+       COUNT(*)    AS samples
+FROM readings
 GROUP BY bucket, host
 WITH NO DATA;
 
 -- Daily aggregates for multi-year history.
 CREATE MATERIALIZED VIEW IF NOT EXISTS power_day
 WITH (timescaledb.continuous) AS
-SELECT time_bucket('1 day', bucket) AS bucket,
+SELECT time_bucket('1 day', ts) AS bucket,
        host,
-       AVG(leg1_a_avg) AS leg1_a_avg,
-       MAX(leg1_a_max) AS leg1_a_max,
-       AVG(leg2_a_avg) AS leg2_a_avg,
-       MAX(leg2_a_max) AS leg2_a_max,
-       SUM(samples)    AS samples
-FROM power_1hour
+       AVG(leg1_a) AS leg1_a_avg,
+       MAX(leg1_a) AS leg1_a_max,
+       AVG(leg2_a) AS leg2_a_avg,
+       MAX(leg2_a) AS leg2_a_max,
+       COUNT(*)    AS samples
+FROM readings
 GROUP BY bucket, host
 WITH NO DATA;
 

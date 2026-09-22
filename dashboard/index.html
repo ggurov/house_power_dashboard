@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>House Power</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div class="title">
+    <h1>House Power</h1>
+    <div class="sub">split-phase 2 &times; 120 V &middot; CT clamps via ADS1256</div>
+  </div>
+  <div class="live">
+    <div class="total"><span id="totalW">&mdash;</span><small>W</small></div>
+    <div class="legs">
+      <div class="leg l1"><span class="dot"></span>Leg 1 <b id="leg1W">&mdash;</b> W <span class="amps">(<span id="leg1A">&mdash;</span> A)</span></div>
+      <div class="leg l2"><span class="dot"></span>Leg 2 <b id="leg2W">&mdash;</b> W <span class="amps">(<span id="leg2A">&mdash;</span> A)</span></div>
+    </div>
+    <div class="status"><span id="connDot" class="conn waiting"></span><span id="connText">connecting&hellip;</span><span id="age"></span></div>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <div class="card-head"><h2>Live</h2><span class="hint">last 10 min, 1 s resolution</span></div>
+    <canvas id="liveChart" height="180"></canvas>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>History</h2>
+      <div class="ranges" id="ranges">
+        <button data-range="86400" class="active">24H</button>
+        <button data-range="604800">7D</button>
+        <button data-range="2592000">30D</button>
+        <button data-range="31536000">1Y</button>
+        <button data-range="all">ALL</button>
+      </div>
+    </div>
+    <canvas id="histChart" height="220"></canvas>
+    <div class="hint" id="histMeta"></div>
+  </section>
+</main>
+
+<footer>
+  Voltage assumed 120 V/leg (clamps measure current only) &middot;
+  raw 1 s data kept 90 days, minute/hour/day aggregates kept indefinitely &middot;
+  sampler schema v<span id="schemaV">&mdash;</span>, clamp range <span id="rangeSetting">&mdash;</span> A
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

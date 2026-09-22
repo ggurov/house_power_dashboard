@@ -190,8 +190,12 @@ def create_app(store=None):
         return {"ok": ok, "db": app.state.store is not None and ok,
                 "nilm": app.state.nilm is not None}
 
-    dash_dir = os.path.join(os.path.dirname(__file__), "..", "dashboard")
-    if os.path.isdir(dash_dir):
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [os.environ.get("DASH_DIR", ""),
+                  os.path.normpath(os.path.join(here, "..", "dashboard")),  # repo checkout
+                  os.path.join(here, "dashboard")]                          # container mount
+    dash_dir = next((d for d in candidates if d and os.path.isdir(d)), None)
+    if dash_dir is not None:
         app.mount("/", StaticFiles(directory=dash_dir, html=True), name="dashboard")
     else:
         @app.get("/", response_class=HTMLResponse)
@@ -206,6 +210,13 @@ app = create_app()
 
 @app.on_event("startup")
 def startup():
+    try:
+        from db import Store
+
+        app.state.store = Store.connect()
+        log.info("DB connected")
+    except Exception:  # noqa: BLE001 - live mode survives without the DB
+        log.exception("DB unavailable; running live-only (history disabled)")
     if os.environ.get("MQTT_DISABLED") == "1":
         log.info("MQTT disabled")
         return
