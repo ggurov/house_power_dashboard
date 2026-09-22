@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import threading
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -34,7 +35,27 @@ def parse_ts(value):
 
 
 def create_app(store=None):
-    app = FastAPI(title="house_power_dashboard")
+    @asynccontextmanager
+    async def lifespan(app):
+        try:
+            from db import Store
+
+            app.state.store = Store.connect()
+            log.info("DB connected")
+        except Exception:  # noqa: BLE001 - live mode survives without the DB
+            log.exception("DB unavailable; running live-only (history disabled)")
+        if os.environ.get("MQTT_DISABLED") != "1":
+            try:
+                from mqtt_ingest import start_mqtt
+
+                start_mqtt(app.state.handle_reading)
+            except Exception:  # noqa: BLE001
+                log.exception("MQTT thread failed to start; HTTP ingest still works")
+        else:
+            log.info("MQTT disabled")
+        yield
+
+    app = FastAPI(title="house_power_dashboard", lifespan=lifespan)
     app.state.store = store
     app.state.latest = None
     app.state.lock = threading.Lock()
@@ -206,23 +227,3 @@ def create_app(store=None):
 
 
 app = create_app()
-
-
-@app.on_event("startup")
-def startup():
-    try:
-        from db import Store
-
-        app.state.store = Store.connect()
-        log.info("DB connected")
-    except Exception:  # noqa: BLE001 - live mode survives without the DB
-        log.exception("DB unavailable; running live-only (history disabled)")
-    if os.environ.get("MQTT_DISABLED") == "1":
-        log.info("MQTT disabled")
-        return
-    try:
-        from mqtt_ingest import start_mqtt
-
-        start_mqtt(app.state.handle_reading)
-    except Exception:  # noqa: BLE001
-        log.exception("MQTT thread failed to start; HTTP ingest still works")
