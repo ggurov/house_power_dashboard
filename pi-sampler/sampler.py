@@ -104,7 +104,15 @@ def build_payload(ts, leg1_a, leg2_a, range_amps, host):
 
 
 class ADCReader:
-    """Thin wrapper over the vendored Waveshare driver (lazy import: tests mock it)."""
+    """Thin wrapper over the vendored Waveshare driver (lazy import: tests mock it).
+
+    Robustness: each clamp output is fanned out to 4 ADC channels carrying the
+    SAME voltage, but a share of single conversions come back as code 0 (stale
+    / collided SPI transfer — the vendor driver maps its negative-code quirk
+    to 0 too). So per channel we retry once on exact 0, and per leg we take
+    the MEDIAN of the 4 fanned channels instead of the mean: one bad read (0
+    or a bit-flip spike) can no longer move the published value.
+    """
 
     def __init__(self, drate):
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "ads1256_vendor"))
@@ -118,14 +126,25 @@ class ADCReader:
             log.warning("ADS1256_init reported failure; continuing anyway (legacy behavior)")
         self.adc.ADS1256_ConfigADC(0, drate)
         log.info("ADS1256 ready (drate=0x%02x)", drate)
+        self.zeros_retried = 0
+        self.zeros_kept = 0
 
-    def read_all(self):
-        return self.adc.ADS1256_GetAll()
+    def read_channel(self, ch):
+        # A driven 0-5 V input never converts to exactly 0 (1 LSB ~ 0.6 uV,
+        # noise floor is far above that), so code 0 means a bad transfer.
+        code = self.adc.ADS1256_GetChannalValue(ch)
+        if code == 0:
+            self.zeros_retried += 1
+            code = self.adc.ADS1256_GetChannalValue(ch)
+            if code == 0:
+                self.zeros_kept += 1
+        return code
 
-    @staticmethod
-    def average(raw_values, channels, range_amps):
-        vals = [raw_to_volts(raw_values[c]) for c in channels]
-        return volts_to_amps(sum(vals) / len(vals), range_amps)
+    def read_leg_amps(self, channels, range_amps):
+        volts = sorted(raw_to_volts(self.read_channel(c)) for c in channels)
+        n = len(volts)
+        med = volts[n // 2] if n % 2 else (volts[n // 2 - 1] + volts[n // 2]) / 2
+        return volts_to_amps(med, range_amps)
 
 
 class Publisher(threading.Thread):
@@ -235,14 +254,18 @@ def main():
     signal.signal(signal.SIGINT, _sig)
 
     period = 1.0 / cfg.publish_hz
+    n = 0
     try:
         while not stop.is_set():
             t0 = time.time()
             try:
-                raw = reader.read_all()
-                leg1 = ADCReader.average(raw, cfg.leg1_ch, cfg.range_amps)
-                leg2 = ADCReader.average(raw, cfg.leg2_ch, cfg.range_amps)
+                leg1 = reader.read_leg_amps(cfg.leg1_ch, cfg.range_amps)
+                leg2 = reader.read_leg_amps(cfg.leg2_ch, cfg.range_amps)
                 pub.publish(build_payload(t0, leg1, leg2, cfg.range_amps, cfg.host))
+                n += 1
+                if n % 60 == 0:
+                    log.info("reads=%d zero_retries=%d zero_kept=%d leg1=%.2fA leg2=%.2fA",
+                             n, reader.zeros_retried, reader.zeros_kept, leg1, leg2)
             except Exception:  # noqa: BLE001 - sampler loop must never die
                 log.exception("read failed")
             dt = time.time() - t0
