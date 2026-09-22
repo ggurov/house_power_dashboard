@@ -112,8 +112,10 @@ class ADCReader:
 
         self._mod = ADS1256
         self.adc = ADS1256.ADS1256()
+        # NOTE: some boards (incl. ours) fail the chip-ID check yet read fine —
+        # the legacy loop ignored init()'s return for years. Warn, don't die.
         if self.adc.ADS1256_init() != 0:
-            raise RuntimeError("ADS1256 init failed")
+            log.warning("ADS1256_init reported failure; continuing anyway (legacy behavior)")
         self.adc.ADS1256_ConfigADC(0, drate)
         log.info("ADS1256 ready (drate=0x%02x)", drate)
 

@@ -39,4 +39,11 @@ END \$\$;
 SQL
 sudo -u postgres createdb -O house_power house_power 2>/dev/null || true
 sudo -u postgres psql -d house_power -v ON_ERROR_STOP=1 -f /tmp/schema-pg.sql
+# schema may have been created by the postgres superuser on first run —
+# the backend role must own the tables (it runs CREATE INDEX IF NOT EXISTS).
+sudo -u postgres psql -d house_power -v ON_ERROR_STOP=1 -c \
+  "ALTER TABLE IF EXISTS readings OWNER TO house_power;
+   ALTER TABLE IF EXISTS power_1min OWNER TO house_power;
+   ALTER TABLE IF EXISTS power_1hour OWNER TO house_power;
+   ALTER TABLE IF EXISTS power_day OWNER TO house_power;"
 touch /tmp/pi-hosted-step2.done
