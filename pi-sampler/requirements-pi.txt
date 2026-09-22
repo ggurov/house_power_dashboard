@@ -1,0 +1,4 @@
+# Pi sampler deps. spidev + RPi.GPIO come from apt (already on the Pi):
+#   sudo apt install python3-spidev python3-rpi.gpio python3-paho-mqtt
+# Only needed when the apt package is unavailable:
+# paho-mqtt==1.6.1

@@ -1,0 +1,19 @@
+[Unit]
+Description=House power sampler (ADS1256 -> MQTT)
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+# GPIO/SPI need root (replaces the old /etc/rc.local + run.sh spin loop).
+EnvironmentFile=/etc/house-power/sampler.env
+ExecStart=/usr/bin/python3 /opt/house-power/sampler.py
+Restart=always
+RestartSec=2
+Nice=-5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

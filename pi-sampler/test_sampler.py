@@ -1,0 +1,109 @@
+"""Sampler unit tests — hardware is stubbed (spidev/RPi.GPIO/ADC), so these run
+on the workstation. Verifies calibration math, schema, channel mapping,
+and the never-block publish path."""
+
+import json
+import os
+import sys
+import types
+
+import pytest
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+# ---- Stub Pi-only hardware modules before importing sampler ----
+spidev = types.ModuleType("spidev")
+spidev.SpiDev = lambda *a: types.SimpleNamespace(  # noqa: E731
+    writebytes=lambda *a: None, readbytes=lambda n: [0] * n,
+    max_speed_hz=0, mode=0)
+sys.modules["spidev"] = spidev
+
+gpio = types.ModuleType("RPi.GPIO")
+for name in ("BCM", "OUT", "IN", "HIGH", "LOW", "PUD_UP"):
+    setattr(gpio, name, name)
+gpio.setmode = gpio.setwarnings = gpio.setup = gpio.output = lambda *a, **k: None
+gpio.input = lambda *a: 0
+gpio.cleanup = lambda: None
+rpi = types.ModuleType("RPi")
+rpi.GPIO = gpio
+sys.modules["RPi"] = rpi
+sys.modules["RPi.GPIO"] = gpio
+
+os.environ.setdefault("RANGE_AMPS", "100")
+import sampler  # noqa: E402
+
+
+class FakeADC:
+    """Pretends leg1 channels read 2.5 V (mid-scale) and leg2 read 1.0 V."""
+
+    def __init__(self):
+        self.drate = None
+
+    def ADS1256_init(self):
+        return 0
+
+    def ADS1256_ConfigADC(self, gain, drate):
+        self.drate = drate
+
+    def ADS1256_GetAll(self):
+        code = lambda v: int(v * sampler.FULL_SCALE / sampler.VREF)  # noqa: E731
+        return [code(2.5), code(1.0)] * 4
+
+
+def test_raw_to_volts_endpoints():
+    assert sampler.raw_to_volts(0) == 0.0
+    assert sampler.raw_to_volts(sampler.FULL_SCALE) == pytest.approx(5.0)
+    assert sampler.raw_to_volts(-99) == 0.0  # vendor negative-code quirk
+    assert sampler.raw_to_volts(0xFFFFFF) == pytest.approx(5.0)
+
+
+def test_volts_to_amps_ranges():
+    assert sampler.volts_to_amps(5.0, 100) == 100.0
+    assert sampler.volts_to_amps(2.5, 200) == 100.0
+    assert sampler.volts_to_amps(5.0, 150) == 150.0
+
+
+def test_average_uses_configured_channels():
+    reader_codes = FakeADC().ADS1256_GetAll()
+    leg1 = sampler.ADCReader.average(reader_codes, [0, 2, 4, 6], 100)
+    leg2 = sampler.ADCReader.average(reader_codes, [1, 3, 5, 7], 100)
+    assert leg1 == pytest.approx(50.0, abs=0.01)
+    assert leg2 == pytest.approx(20.0, abs=0.01)
+
+
+def test_payload_schema_v1():
+    p = sampler.build_payload(1727123456.5, 12.3456, 1.0, 150, "adcpi1")
+    assert p == {"v": 1, "ts": 1727123456.5, "leg1_A": 12.346,
+                 "leg2_A": 1.0, "range_setting": 150, "host": "adcpi1"}
+    json.dumps(p)  # must be JSON-serializable
+
+
+def test_config_rejects_bad_range(monkeypatch):
+    monkeypatch.setenv("RANGE_AMPS", "300")
+    with pytest.raises(ValueError):
+        sampler.SamplerConfig()
+
+
+def test_publisher_never_blocks_and_drops_oldest(monkeypatch):
+    monkeypatch.setenv("RANGE_AMPS", "100")
+    cfg = sampler.SamplerConfig()
+    cfg.http_url = ""  # no network in tests
+    pub = sampler.Publisher(cfg)
+    pub.q = sampler.queue.Queue(maxsize=2)
+    for i in range(5):
+        pub.publish({"v": 1, "i": i})  # must not raise or block
+    assert pub.q.qsize() == 2
+
+
+def test_end_to_end_reading(monkeypatch):
+    """Fake ADC -> payload math matches amps = volts/5 * range."""
+    monkeypatch.setenv("RANGE_AMPS", "200")
+    cfg = sampler.SamplerConfig()
+    adc = FakeADC()
+    raw = adc.ADS1256_GetAll()
+    p = sampler.build_payload(1.0,
+                              sampler.ADCReader.average(raw, cfg.leg1_ch, cfg.range_amps),
+                              sampler.ADCReader.average(raw, cfg.leg2_ch, cfg.range_amps),
+                              cfg.range_amps, "test")
+    assert p["leg1_A"] == pytest.approx(100.0, abs=0.05)  # 2.5V of 5V * 200A
+    assert p["leg2_A"] == pytest.approx(40.0, abs=0.05)   # 1.0V of 5V * 200A
