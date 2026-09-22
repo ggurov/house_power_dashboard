@@ -10,20 +10,33 @@ from datetime import datetime, timezone
 
 log = logging.getLogger("db")
 
-SCHEMA_STATEMENTS = [
-    "CREATE EXTENSION IF NOT EXISTS timescaledb",
+SCHEMA_BASE = [
     """CREATE TABLE IF NOT EXISTS readings (
         ts TIMESTAMPTZ NOT NULL,
         leg1_a DOUBLE PRECISION NOT NULL,
         leg2_a DOUBLE PRECISION NOT NULL,
         range_setting SMALLINT NOT NULL,
         host TEXT NOT NULL DEFAULT '')""",
-    "SELECT create_hypertable('readings', 'ts', if_not_exists => TRUE)",
     "CREATE INDEX IF NOT EXISTS readings_ts_idx ON readings (ts DESC)",
 ]
 
-# (view, bucket-size label, source) for history routing.
+# Aggregate view/table names for history routing (CAGGs on TimescaleDB,
+# plain rollup tables on Pi-hosted PostgreSQL — same shape).
 AGG_VIEWS = ("power_1min", "power_1hour", "power_day")
+
+# Plain-PostgreSQL rollup tables (Pi-hosted, no TimescaleDB on armhf).
+# Same names/columns as the continuous aggregates in db/init.sql, refreshed
+# by pi-hosted/refresh.sql on a timer — history() works unchanged.
+ROLLUP_TABLES = [
+    """CREATE TABLE IF NOT EXISTS %s (
+        bucket TIMESTAMPTZ NOT NULL,
+        host TEXT NOT NULL DEFAULT '',
+        leg1_a_avg DOUBLE PRECISION, leg1_a_max DOUBLE PRECISION,
+        leg2_a_avg DOUBLE PRECISION, leg2_a_max DOUBLE PRECISION,
+        samples BIGINT,
+        PRIMARY KEY (bucket, host))""" % t
+    for t in AGG_VIEWS
+]
 
 
 class Store:
@@ -45,8 +58,18 @@ class Store:
 
     def ensure_schema(self):
         with self.conn.cursor() as cur:
-            for stmt in SCHEMA_STATEMENTS:
+            for stmt in SCHEMA_BASE:
                 cur.execute(stmt)
+            cur.execute("SELECT 1 FROM pg_available_extensions"
+                        " WHERE name = 'timescaledb'")
+            if cur.fetchone():
+                cur.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
+                cur.execute("SELECT create_hypertable('readings', 'ts',"
+                            " if_not_exists => TRUE)")
+            else:
+                log.info("no TimescaleDB; using plain rollup tables")
+                for stmt in ROLLUP_TABLES:
+                    cur.execute(stmt)
 
     def insert(self, ts, leg1_a, leg2_a, range_setting, host):
         with self.conn.cursor() as cur:

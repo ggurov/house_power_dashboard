@@ -1,0 +1,9 @@
+[Unit]
+Description=House power rollup refresh (aggregates + retention)
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+ExecStart=/usr/bin/psql -d house_power -v ON_ERROR_STOP=1 -f /opt/house-power/refresh.sql
