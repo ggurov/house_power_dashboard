@@ -123,6 +123,10 @@ after a power cut. Verified with `systemctl is-enabled`:
 systemctl is-enabled pi-sampler house-power-backend house-power-rollup.timer mosquitto postgresql
 ```
 
+Cold-boot tested 2026-09-23: SSH reachable ~2 min after `reboot`, all
+services active, no legacy reader, backend healthy with fresh readings, and
+the sampler's first 60 reads needed zero corrections.
+
 The legacy graphite sampler cannot come back: its `/etc/rc.local` line is
 commented out and its root cron entry was already disabled. If you ever need
 to confirm no second SPI master exists: `ps aux | grep '[m]ain.py'` must
