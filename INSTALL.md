@@ -106,6 +106,28 @@ sudo journalctl -u pi-sampler -f                 # zero_retries should stay ~fla
 Dashboard: `http://<pi-ip>:8000/` (LAN only). Finish with a known-load
 test (kettle on a 120 V circuit → one leg steps ~+10–12 A within a second).
 
+## Surviving reboots
+
+Everything is systemd-enabled and comes back on its own — no manual steps
+after a power cut. Verified with `systemctl is-enabled`:
+
+| Unit | Role | Order |
+|---|---|---|
+| `postgresql` | readings + rollup tables | first (others require it) |
+| `mosquitto` | MQTT broker (localhost:1883) | early |
+| `house-power-backend` | API + dashboard :8000 | after postgres + mosquitto |
+| `pi-sampler` | ADC loop → MQTT | after mosquitto; self-heals if the broker isn't up yet (queued publish retries forever) |
+| `house-power-rollup.timer` | 5-min aggregate refresh + 90-day retention | after postgres |
+
+```bash
+systemctl is-enabled pi-sampler house-power-backend house-power-rollup.timer mosquitto postgresql
+```
+
+The legacy graphite sampler cannot come back: its `/etc/rc.local` line is
+commented out and its root cron entry was already disabled. If you ever need
+to confirm no second SPI master exists: `ps aux | grep '[m]ain.py'` must
+print nothing.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |

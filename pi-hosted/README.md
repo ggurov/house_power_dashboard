@@ -40,6 +40,8 @@ script — run the equivalent commands one by one, or install your key first:
 - `/etc/house-power/`: `sampler.env`, `backend.env` (generated `DB_DSN`
   password, mode 600). Never in git.
 - Services: `pi-sampler`, `house-power-backend`, `house-power-rollup.timer`
-  (+ stock `mosquitto`, `postgresql`). Legacy `/root/ADS1256_graphite/run.sh`
+  (+ stock `mosquitto`, `postgresql`) — all `systemctl enable`d, so a reboot
+  or power cut recovers unattended (backend waits for postgres+mosquitto,
+  sampler retries the broker forever). Legacy `/root/ADS1256_graphite/run.sh`
   is disabled in `/etc/rc.local` and its processes stopped.
 - Dashboard: `http://<pi-ip>:8000/` (LAN only).
