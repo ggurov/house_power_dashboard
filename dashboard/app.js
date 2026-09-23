@@ -139,13 +139,19 @@ function connectSSE() {
   es.onmessage = (e) => { try { onReading(JSON.parse(e.data)); } catch (_) { /* keep old */ } };
 }
 
+let currentRange = 86400;
 async function loadHistory(seconds) {
+  currentRange = seconds;
   const now = Date.now() / 1000;
   const start = seconds === "all" ? 0 : now - seconds;
   const meta = $("histMeta");
   meta.textContent = "loading\u2026";
+  // One bucket per chart pixel: the server averages, we transfer ~1k
+  // points instead of ~20k. Zero visual loss on a line chart.
+  const px = Math.min(4000, Math.max(50,
+    Math.round($("histChart").clientWidth) || 800));
   try {
-    const r = await fetch(`/api/v1/history?start=${start}&end=${now}`);
+    const r = await fetch(`/api/v1/history?start=${start}&end=${now}&pixels=${px}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const h = await r.json();
     drawChart($("histChart"), [
@@ -153,7 +159,7 @@ async function loadHistory(seconds) {
       { name: "L2", color: "#5ac8fa", points: h.points.map((p) => ({ t: p.t, y: p.leg2_w })) },
       { name: "Total", color: "#7ee787", points: h.points.map((p) => ({ t: p.t, y: p.total_w })) },
     ]);
-    meta.textContent = `${h.points.length} points \u00b7 resolution: ${h.resolution} \u00b7 ${h.volts} V assumed/leg`;
+    meta.textContent = `${h.points.length} points \u00b7 ${h.step_s}s buckets \u00b7 ${h.resolution} \u00b7 ${h.volts} V assumed/leg`;
   } catch (e) {
     meta.textContent = `history unavailable (${e.message})`;
   }
@@ -167,7 +173,13 @@ $("ranges").addEventListener("click", (e) => {
   loadHistory(b.dataset.range === "all" ? "all" : Number(b.dataset.range));
 });
 
-window.addEventListener("resize", () => { renderLive(); });
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  renderLive();
+  // Chart width changed -> rebucket from the server (debounced).
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => loadHistory(currentRange), 400);
+});
 fetch("/api/v1/current").then((r) => r.json()).then(onReading).catch(() => {});
 preloadLive();
 connectSSE();

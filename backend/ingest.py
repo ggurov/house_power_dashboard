@@ -51,3 +51,10 @@ def pick_table(span_seconds):
     if span_seconds <= 400 * 86400:
         return "power_1hour"
     return "power_day"
+
+
+def bucket_step(span_seconds, pixels):
+    """One aggregate bucket per chart pixel (floor 1s). Fewer points shipped,
+    zero visual loss: a line chart can't show more detail than its pixels."""
+    pixels = max(50, min(4000, int(pixels or 1200)))
+    return max(1, int(span_seconds / pixels))

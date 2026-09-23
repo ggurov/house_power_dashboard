@@ -142,7 +142,9 @@ def create_app(store=None):
             start: str = Query(..., description="unix ts or ISO-8601"),
             end: str = Query(..., description="unix ts or ISO-8601"),
             resolution: str = Query("auto",
-                                    pattern="^(auto|raw|1min|1hour|day)$")):
+                                    pattern="^(auto|raw|1min|1hour|day)$"),
+            pixels: int = Query(1200, ge=50, le=4000,
+                                description="chart width; one bucket per pixel")):
         try:
             t0, t1 = parse_ts(start), parse_ts(end)
         except ValueError as e:
@@ -153,15 +155,16 @@ def create_app(store=None):
                  "1hour": "power_1hour", "day": "power_day"}.get(resolution)
         if table is None:
             table = ingest.pick_table(t1 - t0)
+        step = ingest.bucket_step(t1 - t0, pixels)
         if app.state.store is None:
             raise HTTPException(503, "storage unavailable")
         s = datetime.fromtimestamp(t0, timezone.utc)
         e = datetime.fromtimestamp(t1, timezone.utc)
         try:
-            rows = app.state.store.history(s, e, table)
+            rows = app.state.store.history(s, e, table, step)
         except Exception as ex:  # noqa: BLE001
             raise HTTPException(503, f"storage unavailable: {ex}") from ex
-        return {"resolution": table, "volts": VOLTS, "points": [
+        return {"resolution": table, "step_s": step, "volts": VOLTS, "points": [
             {"t": (r[0].timestamp() if hasattr(r[0], "timestamp") else float(r[0])),
              "leg1_w": round(VOLTS * r[1], 2), "leg2_w": round(VOLTS * r[2], 2),
              "total_w": round(VOLTS * (r[1] + r[2]), 2)}

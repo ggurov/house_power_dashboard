@@ -30,15 +30,20 @@ class FakeStore:
         ts, l1, l2, rng, host = max(self.rows, key=lambda r: r[0])
         return (datetime.fromtimestamp(ts, timezone.utc), l1, l2, rng, host)
 
-    def history(self, start, end, table):
+    def history(self, start, end, table, step_s=1):
+        import math
         from datetime import datetime, timezone
 
-        out = []
+        buckets = {}
         for ts, l1, l2, _rng, _h in sorted(self.rows):
             dt = datetime.fromtimestamp(ts, timezone.utc)
             if start <= dt <= end:
-                out.append((dt, l1, l2))
-        return out
+                b = math.floor(ts / max(1, int(step_s))) * max(1, int(step_s))
+                buckets.setdefault(b, []).append((l1, l2))
+        return [(datetime.fromtimestamp(b, timezone.utc),
+                 sum(v[0] for v in vs) / len(vs),
+                 sum(v[1] for v in vs) / len(vs))
+                for b, vs in sorted(buckets.items())]
 
 
 @pytest.fixture()
@@ -81,6 +86,32 @@ def test_pick_table_routing():
     assert ingest.pick_table(500 * 86400) == "power_day"
 
 
+def test_bucket_step_one_per_pixel():
+    assert ingest.bucket_step(600, 600) == 1
+    assert ingest.bucket_step(3600, 900) == 4
+    assert ingest.bucket_step(86400, 1000) == 86
+    assert ingest.bucket_step(10, 600) == 1  # floored at 1s
+    assert ingest.bucket_step(3600, 10**9) == 1  # pixels clamped, span wins
+
+
+def test_history_buckets_to_pixels(client):
+    for i in range(100):
+        client.post("/api/v1/readings", json=reading(ts=1727123456.0 + i))
+    h = client.get("/api/v1/history",
+                   params={"start": 1727123456, "end": 1727123556,
+                           "pixels": 50}).json()
+    assert h["step_s"] == 2  # 100 s span / 50 px
+    assert len(h["points"]) == 50
+    assert h["points"][0]["total_w"] == 1800.0
+
+
+def test_history_rejects_tiny_pixels(client):
+    r = client.get("/api/v1/history",
+                   params={"start": 1727123456, "end": 1727123466,
+                           "pixels": 5})
+    assert r.status_code == 422
+
+
 def test_ingest_current_roundtrip(client):
     r = client.post("/api/v1/readings", json=reading())
     assert r.status_code == 200, r.text
@@ -108,8 +139,9 @@ def test_history_explicit_resolution_passes_table_name(client):
     seen = {}
 
     class Spy(FakeStore):
-        def history(self, s, e, t):
+        def history(self, s, e, t, step_s=1):
             seen["table"] = t
+            seen["step"] = step_s
             return []
 
     app = create_app(store=Spy())

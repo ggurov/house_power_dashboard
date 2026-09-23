@@ -85,30 +85,36 @@ class Store:
                         " ORDER BY ts DESC LIMIT 1")
             return cur.fetchone()
 
-    def history(self, start, end, table):
-        """Return rows (ts, leg1_a, leg2_a) from raw readings or an aggregate view.
+    def history(self, start, end, table, step_s=1):
+        """Return rows (bucket_ts, leg1_a, leg2_a), one per step_s seconds.
 
-        Falls back to raw readings if the aggregate view is missing (e.g. a
-        dev database created via ensure_schema instead of db/init.sql).
+        Bucketing is plain epoch arithmetic (no Timescale-only functions) so
+        it works on Pi-hosted plain PostgreSQL too. Rollup sources are
+        re-averaged weighted by their sample counts. Falls back to raw
+        readings if the aggregate view is missing.
         """
+        step = max(1, int(step_s))
         try:
-            return self._history_from(start, end, table)
+            return self._history_from(start, end, table, step)
         except Exception:  # noqa: BLE001
             if table == "readings":
                 raise
             log.warning("aggregate %s unavailable, falling back to raw", table)
-            return self._history_from(start, end, "readings")
+            return self._history_from(start, end, "readings", step)
 
-    def _history_from(self, start, end, table):
+    def _history_from(self, start, end, table, step):
+        col = "ts" if table == "readings" else "bucket"
+        bucket = (f"to_timestamp(floor(extract(epoch from {col})/%s)*%s)")
+        if table == "readings":
+            select = f"{bucket} AS b, AVG(leg1_a), AVG(leg2_a)"
+        else:
+            select = (f"{bucket} AS b,"
+                      " SUM(leg1_a_avg*samples)/NULLIF(SUM(samples),0),"
+                      " SUM(leg2_a_avg*samples)/NULLIF(SUM(samples),0)")
         with self.conn.cursor() as cur:
-            if table == "readings":
-                cur.execute(
-                    "SELECT ts, leg1_a, leg2_a FROM readings"
-                    " WHERE ts >= %s AND ts <= %s ORDER BY ts ASC LIMIT 20000",
-                    (start, end))
-            else:
-                cur.execute(
-                    f"SELECT bucket, leg1_a_avg, leg2_a_avg FROM {table}"
-                    " WHERE bucket >= %s AND bucket <= %s ORDER BY bucket ASC LIMIT 20000",
-                    (start, end))
+            cur.execute(
+                f"SELECT {select} FROM {table}"
+                f" WHERE {col} >= %s AND {col} <= %s"
+                " GROUP BY b ORDER BY b ASC LIMIT 20000",
+                (step, step, start, end))
             return cur.fetchall()
