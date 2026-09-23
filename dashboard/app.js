@@ -74,7 +74,22 @@ function renderLive() {
 }
 
 let lastTs = 0;
-let maxBufTs = 0;   // newest ts already in liveBuf (preload or stream)
+let maxBufTs = 0;   // newest ts in liveBuf (drives the 10-min eviction window)
+const bufTs = new Set();  // every ts in liveBuf: dedupes SSE stream vs preload
+function pushLive(t, l1, l2, tot) {  // false = duplicate, ignored
+  if (bufTs.has(t)) return false;
+  bufTs.add(t);
+  liveBuf.push({ t, l1, l2, tot });
+  if (t > maxBufTs) maxBufTs = t;
+  return true;
+}
+function evictLive() {
+  const cutoff = maxBufTs - LIVE_WINDOW;
+  while (liveBuf.length && liveBuf[0].t < cutoff) {
+    bufTs.delete(liveBuf[0].t);
+    liveBuf.shift();
+  }
+}
 function onReading(m) {
   lastTs = m.ts;
   $("totalW").textContent = fmt(m.total_w);
@@ -82,29 +97,31 @@ function onReading(m) {
   $("leg2W").textContent = fmt(m.leg2_w); $("leg2A").textContent = fmt(m.leg2_a, 2);
   $("rangeSetting").textContent = m.range_setting;
   $("schemaV").textContent = m.v != null ? m.v : "1";
-  if (m.ts > maxBufTs) {
-    maxBufTs = m.ts;
-    liveBuf.push({ t: m.ts, l1: m.leg1_w, l2: m.leg2_w, tot: m.total_w });
-    while (liveBuf.length && liveBuf[0].t < m.ts - LIVE_WINDOW) liveBuf.shift();
+  if (pushLive(m.ts, m.leg1_w, m.leg2_w, m.total_w)) {
+    evictLive();
     renderLive();
   }
 }
 
 // Fill the live chart from storage so a reload doesn't wipe it.
-// SSE takes over from the newest preloaded point (dedupe via maxBufTs).
+// Merge (don't replace): the SSE stream usually delivers the newest point
+// BEFORE the preload query returns, so a naive "skip older than newest"
+// check would discard the entire preload. A ts Set dedupes either order.
 async function preloadLive() {
   const now = Date.now() / 1000;
   try {
     const r = await fetch(`/api/v1/history?start=${now - LIVE_WINDOW}&end=${now}`);
     if (!r.ok) return;
     const h = await r.json();
+    let added = 0;
     for (const p of h.points) {
-      if (p.t > maxBufTs) {
-        maxBufTs = p.t;
-        liveBuf.push({ t: p.t, l1: p.leg1_w, l2: p.leg2_w, tot: p.total_w });
-      }
+      if (pushLive(p.t, p.leg1_w, p.leg2_w, p.total_w)) added++;
     }
-    renderLive();
+    if (added) {
+      liveBuf.sort((a, b) => a.t - b.t);
+      evictLive();
+      renderLive();
+    }
   } catch (_) { /* storage unavailable: SSE fills the chart from scratch */ }
 }
 
