@@ -95,8 +95,66 @@ appliance steps are all visible in history.
 
 ## Quick start
 
-> Full guide (including a copy-paste prompt for AI-agent installs):
-> [`INSTALL.md`](INSTALL.md)
+Easiest path: paste the prompt below into an AI coding agent, filling in the
+blanks — it encodes every gotcha from a real install (slow Pi, SPI-bus
+contention, SSH password quirks, calibration). Manual steps, troubleshooting,
+and boot behavior live in [`INSTALL.md`](INSTALL.md).
+
+```text
+Install house_power_dashboard (https://github.com/ggurov/house_power_dashboard.git)
+on my Raspberry Pi and verify it end to end.
+
+Target Pi: <HOST, e.g. pi@192.168.1.28> / user <USER, usually pi>
+SSH access: <key at path, or "password: ...">
+Hardware: Waveshare High-Precision AD/DA shield (ADS1256) stacked on the Pi.
+  2x FCS2151-SP-5V split-core clamps on the mains, jumper = <100|150|200> A
+  (blank jumper = 100 A). Clamp A channels = <e.g. 0,2,4,6>,
+  clamp B channels = <e.g. 1,3,5,7>.
+Mains: <e.g. North America split-phase, ~120 V per leg>
+
+Procedure:
+1. Clone the repo, read README.md, pi-hosted/README.md, and AGENTS.md if present.
+2. Probe first, install second: SSH to the Pi and record OS version,
+   RAM/disk, `ls /dev/spi*`, existing sampler processes (`ps aux | grep -i ads`),
+   and Python/apt package state. Never apt/pip install blindly on the Pi.
+3. Deploy everything on the Pi with pi-hosted/install.sh
+   (subcommands: launch, status, finish). No Docker or Node on the Pi:
+   mosquitto + PostgreSQL come from apt, the backend runs in a venv
+   (piwheels has the armhf wheels). Pin versions exactly as in
+   pi-hosted/stage3-venv.sh — unpinned paho-mqtt sends pip into
+   version-backtracking hell on a Pi 3.
+4. If SSH uses a password (not a key), do NOT wrap the whole installer in
+   sshpass — it stalls partway. Run each scp/ssh step with its own
+   credentials instead (see pi-hosted/README.md).
+5. Set RANGE_AMPS in /etc/house-power/sampler.env to match the physical
+   clamp jumpers. Leave CALIBRATION=1.0 until a known-load test says otherwise.
+6. Kill any legacy sampler before starting the new one: its command line is
+   just `/usr/bin/python ./main.py` (working directory is invisible to
+   `pkill -f`), so match the argv (`pkill -f 'python \./main\.py'`),
+   escalate to -9 if needed, and VERIFY with ps. Two processes sharing the
+   SPI bus corrupt every reading — this is the #1 failure mode.
+7. Verify, in order: all four services active
+   (pi-sampler, house-power-backend, mosquitto, postgresql); backend
+   `/api/v1/health` shows db:true; `/api/v1/current` shows plausible,
+   INDEPENDENT per-leg amps; exactly one Python sampler in ps; the
+   sampler journal shows ~zero new zero_retries/zero_kept corrections.
+8. Ask me to switch a known load (e.g. a kettle on a 120 V circuit) on/off
+   and confirm exactly one leg steps by the expected amps within 1–2 s.
+   If any fix changed readings mid-deploy, purge the bad window from
+   PostgreSQL (`DELETE FROM readings WHERE ts < <cutoff>` + same for the
+   power_* rollup tables).
+9. Report the dashboard URL (http://<pi-ip>:8000, LAN only) and what was verified.
+
+Hard constraints:
+- NEVER commit secrets (*.env, passwords, tokens) to git. Keep them in
+  /etc/house-power/ on the Pi (mode 600) and local .env files only.
+- Do NOT dist-upgrade the Pi OS release, do NOT reboot without asking,
+  do NOT run builds/agents/Node/Docker on the Pi.
+- Commit repo changes often with clear messages; never push or open PRs
+  unless I explicitly ask.
+```
+
+Or deploy manually — see [`INSTALL.md`](INSTALL.md).
 
 All-on-Pi deploy (sampler, broker, DB, backend, dashboard on `adcpi1` —
 see `pi-hosted/`):
