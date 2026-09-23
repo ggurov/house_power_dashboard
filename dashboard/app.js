@@ -73,7 +73,6 @@ function renderLive() {
   ]);
 }
 
-let lastTs = 0;
 let maxBufTs = 0;   // newest ts in liveBuf (drives the 10-min eviction window)
 const bufTs = new Set();  // every ts in liveBuf: dedupes SSE stream vs preload
 function pushLive(t, l1, l2, tot) {  // false = duplicate, ignored
@@ -91,7 +90,6 @@ function evictLive() {
   }
 }
 function onReading(m) {
-  lastTs = m.ts;
   $("totalW").textContent = fmt(m.total_w);
   $("leg1W").textContent = fmt(m.leg1_w); $("leg1A").textContent = fmt(m.leg1_a, 2);
   $("leg2W").textContent = fmt(m.leg2_w); $("leg2A").textContent = fmt(m.leg2_a, 2);
@@ -125,17 +123,10 @@ async function preloadLive() {
   } catch (_) { /* storage unavailable: SSE fills the chart from scratch */ }
 }
 
-function tickAge() {
-  if (!lastTs) return;
-  const age = Date.now() / 1000 - lastTs;
-  $("age").textContent = age < 5 ? "live" : `${fmt(age)}s ago`;
-}
-
 function connectSSE() {
-  const dot = $("connDot"), txt = $("connText");
+  // No connection indicator by design (it caused mobile layout shift);
+  // EventSource reconnects on its own when the stream drops.
   const es = new EventSource("/api/v1/stream");
-  es.onopen = () => { dot.className = "conn live"; txt.textContent = "live"; };
-  es.onerror = () => { dot.className = "conn dead"; txt.textContent = "reconnecting\u2026"; };
   es.onmessage = (e) => { try { onReading(JSON.parse(e.data)); } catch (_) { /* keep old */ } };
 }
 
@@ -184,4 +175,3 @@ fetch("/api/v1/current").then((r) => r.json()).then(onReading).catch(() => {});
 preloadLive();
 connectSSE();
 loadHistory(86400);
-setInterval(tickAge, 1000);
