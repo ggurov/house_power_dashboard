@@ -95,6 +95,9 @@ appliance steps are all visible in history.
 
 ## Quick start
 
+> Full guide (including a copy-paste prompt for AI-agent installs):
+> [`INSTALL.md`](INSTALL.md)
+
 All-on-Pi deploy (sampler, broker, DB, backend, dashboard on `adcpi1` —
 see `pi-hosted/`):
 
