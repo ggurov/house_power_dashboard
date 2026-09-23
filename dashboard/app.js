@@ -10,6 +10,15 @@ function fmt(n, d = 0) {
     { maximumFractionDigits: d, minimumFractionDigits: d });
 }
 
+function collect(series, pick) {
+  // Same as series.flatMap((s) => s.points.map(pick)) but ES6-only:
+  // pre-2019 browsers (old wall tablets) have no Array.flatMap, which
+  // silently killed every chart while fetches kept succeeding.
+  const out = [];
+  for (const s of series) for (const p of s.points) out.push(pick(p));
+  return out;
+}
+
 function drawChart(canvas, series, opts = {}) {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth, h = canvas.clientHeight || canvas.height;
@@ -18,15 +27,15 @@ function drawChart(canvas, series, opts = {}) {
   const ctx = canvas.getContext("2d");
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
-  const all = series.flatMap((s) => s.points.map((p) => p.y));
+  const all = collect(series, (p) => p.y);
   if (!all.length) {
     ctx.fillStyle = "#8b98a5"; ctx.font = "13px system-ui";
     ctx.fillText("No data yet \u2014 waiting for sampler\u2026", 12, h / 2);
     return;
   }
   let max = Math.max(...all, 1) * 1.1, min = 0;
-  const t0 = Math.min(...series.flatMap((s) => s.points.map((p) => p.t)));
-  const t1 = Math.max(...series.flatMap((s) => s.points.map((p) => p.t)), t0 + 1);
+  const t0 = Math.min(...collect(series, (p) => p.t));
+  const t1 = Math.max(...collect(series, (p) => p.t), t0 + 1);
   const X = (t) => 8 + ((t - t0) / (t1 - t0)) * (w - 16);
   const Y = (v) => h - 22 - ((v - min) / (max - min)) * (h - 34);
   // gridlines + max label
