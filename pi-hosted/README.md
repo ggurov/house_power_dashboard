@@ -1,12 +1,10 @@
 # Pi-hosted (all-in-one) deployment
 
 Everything — sampler, MQTT broker, PostgreSQL, backend API, dashboard —
-runs on the Pi itself. Chosen because the Pi's LAN cannot reach the
-workstation that runs the Docker stack, and no other always-on LAN host
-was available.
+runs on the Pi itself: it is the only always-on host on the Pi's LAN.
 
-Trade-offs vs the Docker Compose stack (which remains the reference for
-off-Pi hosting):
+Trade-offs of the Pi-hosted choice (vs a TimescaleDB host, should the
+project ever move off-Pi):
 
 - **No TimescaleDB**: no 32-bit armhf build exists, so this uses stock
   PostgreSQL 13 with plain rollup tables (`schema-pg.sql`, same names and
@@ -18,8 +16,8 @@ off-Pi hosting):
   backend runs in a Python venv (piwheels for armhf wheels). The dashboard
   is static files served by the backend — nothing to build.
 - **Migration path**: `pg_dump house_power` restores straight into a
-  TimescaleDB instance later; then create the CAGGs from `db/init.sql` and
-  repoint the sampler. No sampler changes needed.
+  TimescaleDB instance later; add continuous aggregates over `readings`
+  following the standard TimescaleDB docs. No sampler changes needed.
 
 ## Install
 

@@ -84,7 +84,7 @@ def parse_channels(spec, default):
 
 class SamplerConfig:
     def __init__(self):
-        self.mqtt_host = getenv("MQTT_HOST", "192.168.1.6")
+        self.mqtt_host = getenv("MQTT_HOST", "localhost")
         self.mqtt_port = int(getenv("MQTT_PORT", "1883"))
         self.mqtt_topic = getenv("MQTT_TOPIC", "house/power/v1")
         self.http_url = getenv("HTTP_URL", "")  # e.g. http://srv:8000/api/v1/readings

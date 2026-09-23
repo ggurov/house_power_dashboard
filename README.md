@@ -23,10 +23,9 @@ CT leg2 (4x fanned) ─┘                          └─HTTP fallback─┐
 
 The Pi does sampling, storage, API, and dashboard all-in-one (no Docker or
 Node on the Pi — mosquitto + PostgreSQL come from apt, the backend runs in a
-venv, the dashboard is static files). A `docker-compose` stack with Mosquitto
-+ TimescaleDB + backend exists as the off-Pi reference deployment; the code
-runs unchanged on both (the DB layer auto-detects TimescaleDB vs plain
-PostgreSQL).
+venv, the dashboard is static files). The backend's DB layer also supports
+TimescaleDB (continuous aggregates) if the project ever moves off-Pi; on the
+Pi it uses plain-PostgreSQL rollup tables with identical names and shapes.
 
 ## Hardware
 
@@ -76,8 +75,8 @@ a year view ships ~1k points instead of ~20k.
   known load.
 
 **Retention:** raw 1 s readings 90 days, then dropped; minute/hour/day
-aggregates kept indefinitely (continuous aggregates on TimescaleDB, timer
-refreshed rollup tables on Pi-hosted PostgreSQL).
+aggregates kept indefinitely (timer-refreshed rollup tables on the Pi;
+continuous aggregates if ever moved to TimescaleDB).
 
 **Validated end to end:** a 900 W coffee maker (@124 V mains = 7.3 A) reads
 7.1 A on exactly one leg with 1-second step edges; relatch dropouts and
@@ -92,26 +91,19 @@ appliance steps are all visible in history.
 | `backend/` | FastAPI ingest, history (pixel-bucketed), SSE stream, serves `dashboard/`. pytest suite. |
 | `dashboard/` | Static HTML/CSS/vanilla-JS page, canvas charts. |
 | `nilm/` | Exploratory power-signature event detector. `ENABLE_NILM=false` by default, never in the critical path. |
-| `db/` | TimescaleDB schema: hypertable, continuous aggregates, retention policies. |
-| `docker-compose.yml` | Off-Pi reference stack (mosquitto + TimescaleDB + backend). |
 | `pics/` | Hardware and dashboard photos used above. |
 
 ## Quick start
 
-Off-Pi reference stack:
+All-on-Pi deploy (sampler, broker, DB, backend, dashboard on `adcpi1` —
+see `pi-hosted/`):
 
 ```bash
-cp .env.example .env   # set POSTGRES_PASSWORD
-docker compose up --build
-# dashboard → http://localhost:8000/
-```
-
-All-on-Pi deploy (sampler, broker, DB, backend, dashboard on `adcpi1`):
-
-```bash
-cd pi-sampler
-SAMPLER_HOST=pi@192.168.1.28 ./install.sh   # workstation-broker variant
-# or: pi-hosted/install.sh launch|status|finish   # everything on the Pi
+cd pi-hosted
+SAMPLER_HOST=pi@192.168.1.28 ./install.sh launch   # copy files, start slow stages
+SAMPLER_HOST=pi@192.168.1.28 ./install.sh status   # poll apt/venv progress
+SAMPLER_HOST=pi@192.168.1.28 ./install.sh finish   # units on, legacy off, start
+# dashboard → http://192.168.1.28:8000/ (from your LAN)
 ```
 
 `RANGE_AMPS` in the sampler env **must** match the physical clamp jumpers.

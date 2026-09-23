@@ -217,7 +217,7 @@ def create_app(store=None):
     here = os.path.dirname(os.path.abspath(__file__))
     candidates = [os.environ.get("DASH_DIR", ""),
                   os.path.normpath(os.path.join(here, "..", "dashboard")),  # repo checkout
-                  os.path.join(here, "dashboard")]                          # container mount
+                  os.path.join(here, "dashboard")]                          # Pi-hosted: /opt/house-power/dashboard
     dash_dir = next((d for d in candidates if d and os.path.isdir(d)), None)
     if dash_dir is not None:
         app.mount("/", StaticFiles(directory=dash_dir, html=True), name="dashboard")
