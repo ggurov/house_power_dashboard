@@ -81,6 +81,21 @@ def test_volts_to_amps_ranges():
     assert sampler.volts_to_amps(5.0, 150) == 150.0
 
 
+def test_volts_to_amps_calibration():
+    # kettle: 12.9 A true vs 9.8 A reported -> CALIBRATION ~= 1.3
+    assert sampler.volts_to_amps(2.5, 100, 1.3) == pytest.approx(65.0)
+    assert sampler.volts_to_amps(2.5, 100) == pytest.approx(50.0)
+
+
+def test_config_calibration_bounds(monkeypatch):
+    monkeypatch.setenv("RANGE_AMPS", "100")
+    monkeypatch.setenv("CALIBRATION", "1.3")
+    assert sampler.SamplerConfig().calibration == 1.3
+    monkeypatch.setenv("CALIBRATION", "5.0")
+    with pytest.raises(ValueError):
+        sampler.SamplerConfig()
+
+
 def test_median_uses_configured_channels(monkeypatch):
     reader = make_reader(monkeypatch)
     leg1 = reader.read_leg_amps([0, 2, 4, 6], 100)

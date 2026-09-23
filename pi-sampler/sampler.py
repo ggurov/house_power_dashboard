@@ -61,9 +61,15 @@ def raw_to_volts(raw):
     return raw * VREF / FULL_SCALE
 
 
-def volts_to_amps(volts, range_amps):
-    """Loulensy 0-5 V DC transducer: amps = volts / 5 * jumper range."""
-    return max(0.0, volts / VREF * range_amps)
+def volts_to_amps(volts, range_amps, calibration=1.0):
+    """Loulensy 0-5 V DC transducer: amps = volts / 5 * jumper range.
+
+    calibration is a measured scale correction (default 1.0 = none).
+    Set it from a known load: CALIBRATION = true_amps / reported_amps.
+    E.g. 1500 W kettle at 124 V mains = 12.9 A true vs 9.8 A reported
+    -> CALIBRATION ~= 1.3 (verify with a plug meter before trusting).
+    """
+    return max(0.0, volts / VREF * range_amps * calibration)
 
 
 def parse_channels(spec, default):
@@ -89,6 +95,9 @@ class SamplerConfig:
         self.adc_drate = int(getenv("ADC_DRATE", "0x82"), 16)  # 100 SPS default
         self.leg1_ch = parse_channels(getenv("LEG1_CHANNELS"), [0, 2, 4, 6])
         self.leg2_ch = parse_channels(getenv("LEG2_CHANNELS"), [1, 3, 5, 7])
+        self.calibration = float(getenv("CALIBRATION", "1.0"))
+        if not 0.5 <= self.calibration <= 2.0:
+            raise ValueError("CALIBRATION must be within 0.5..2.0")
         self.host = getenv("HOST_OVERRIDE", socket.gethostname())
 
 
@@ -140,11 +149,11 @@ class ADCReader:
                 self.zeros_kept += 1
         return code
 
-    def read_leg_amps(self, channels, range_amps):
+    def read_leg_amps(self, channels, range_amps, calibration=1.0):
         volts = sorted(raw_to_volts(self.read_channel(c)) for c in channels)
         n = len(volts)
         med = volts[n // 2] if n % 2 else (volts[n // 2 - 1] + volts[n // 2]) / 2
-        return volts_to_amps(med, range_amps)
+        return volts_to_amps(med, range_amps, calibration)
 
 
 class Publisher(threading.Thread):
@@ -237,8 +246,8 @@ def main():
                         format="%(asctime)s %(levelname)s %(message)s")
     load_env_file()
     cfg = SamplerConfig()
-    log.info("range=%dA leg1=%s leg2=%s mqtt=%s:%d http=%s",
-             cfg.range_amps, cfg.leg1_ch, cfg.leg2_ch,
+    log.info("range=%dA cal=%.3f leg1=%s leg2=%s mqtt=%s:%d http=%s",
+             cfg.range_amps, cfg.calibration, cfg.leg1_ch, cfg.leg2_ch,
              cfg.mqtt_host, cfg.mqtt_port, cfg.http_url or "(none)")
 
     reader = ADCReader(cfg.adc_drate)
@@ -259,8 +268,8 @@ def main():
         while not stop.is_set():
             t0 = time.time()
             try:
-                leg1 = reader.read_leg_amps(cfg.leg1_ch, cfg.range_amps)
-                leg2 = reader.read_leg_amps(cfg.leg2_ch, cfg.range_amps)
+                leg1 = reader.read_leg_amps(cfg.leg1_ch, cfg.range_amps, cfg.calibration)
+                leg2 = reader.read_leg_amps(cfg.leg2_ch, cfg.range_amps, cfg.calibration)
                 pub.publish(build_payload(t0, leg1, leg2, cfg.range_amps, cfg.host))
                 n += 1
                 if n % 60 == 0:
