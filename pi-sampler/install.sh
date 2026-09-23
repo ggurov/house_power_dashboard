@@ -32,7 +32,19 @@ $SSH "$HOST" 'set -e
   sudo systemctl enable --now pi-sampler
   sleep 2
   sudo systemctl is-active pi-sampler
-  echo "--- disable legacy rc.local sampler (kept as backup, not running) ---"
-  sudo sed -i "s|^/root/ADS1256_graphite/run.sh|# /root/ADS1256_graphite/run.sh  # superseded by pi-sampler.service|" /etc/rc.local || true'
+  echo "--- stop legacy sampler (argv match: CWD is invisible to pkill) ---"
+  sudo sed -i "s|^/root/ADS1256_graphite/run.sh|# /root/ADS1256_graphite/run.sh  # superseded by pi-sampler.service|" /etc/rc.local || true
+  sudo pkill -f ADS1256_graphite/run.sh || true
+  sleep 2
+  sudo pkill -f '"'"'python \./main\.py'"'"' || true
+  sleep 5
+  if sudo ps -eo args | grep -q '"'"'python \./main[.]py'"'"'; then
+    sudo pkill -9 -f '"'"'python \./main\.py'"'"' || true
+    sleep 5
+  fi
+  if sudo ps -eo args | grep -q '"'"'python \./main[.]py'"'"'; then
+    echo "ERROR: legacy sampler still alive, aborting"; exit 1
+  fi
+  echo "legacy stopped; single SPI master confirmed"'
 
 echo "done. Verify: backend dashboard should show live watts within seconds."

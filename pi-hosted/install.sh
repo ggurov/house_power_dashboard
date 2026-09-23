@@ -54,12 +54,24 @@ do_finish() {
             /tmp/house-power-rollup.service /tmp/house-power-rollup.timer \
             /etc/systemd/system/
     sudo systemctl daemon-reload
-    # stop legacy graphite sampler (rc.local loop + current process)
+    # stop legacy graphite sampler (rc.local loop + current process).
+    # NOTE: its cmdline is just "/usr/bin/python ./main.py" (CWD is invisible
+    # to pkill -f), so match the argv, escalate, and verify — a stale reader
+    # sharing the SPI bus corrupts every reading.
     sudo sed -i "s|^/root/ADS1256_graphite/run.sh|# /root/ADS1256_graphite/run.sh  # superseded by pi-sampler.service|" /etc/rc.local || true
     sudo pkill -f ADS1256_graphite/run.sh || true
     sleep 2
-    sudo pkill -f "ADS1256_graphite/main.py" || true
-    sleep 2
+    sudo pkill -f 'python \./main\.py' || true
+    sleep 5
+    if sudo ps -eo args | grep -q 'python \./main[.]py'; then
+      echo "legacy still alive after TERM, escalating to KILL"
+      sudo pkill -9 -f 'python \./main\.py' || true
+      sleep 5
+    fi
+    if sudo ps -eo args | grep -q 'python \./main[.]py'; then
+      echo "ERROR: legacy sampler still alive, aborting"; exit 1
+    fi
+    echo "legacy stopped; single SPI master confirmed"
     sudo systemctl enable --now pi-sampler house-power-backend house-power-rollup.timer
     sleep 3
     sudo systemctl is-active pi-sampler house-power-backend
