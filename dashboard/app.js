@@ -65,6 +65,7 @@ function renderLive() {
 }
 
 let lastTs = 0;
+let maxBufTs = 0;   // newest ts already in liveBuf (preload or stream)
 function onReading(m) {
   lastTs = m.ts;
   $("totalW").textContent = fmt(m.total_w);
@@ -72,9 +73,30 @@ function onReading(m) {
   $("leg2W").textContent = fmt(m.leg2_w); $("leg2A").textContent = fmt(m.leg2_a, 2);
   $("rangeSetting").textContent = m.range_setting;
   $("schemaV").textContent = m.v != null ? m.v : "1";
-  liveBuf.push({ t: m.ts, l1: m.leg1_w, l2: m.leg2_w, tot: m.total_w });
-  while (liveBuf.length && liveBuf[0].t < m.ts - LIVE_WINDOW) liveBuf.shift();
-  renderLive();
+  if (m.ts > maxBufTs) {
+    maxBufTs = m.ts;
+    liveBuf.push({ t: m.ts, l1: m.leg1_w, l2: m.leg2_w, tot: m.total_w });
+    while (liveBuf.length && liveBuf[0].t < m.ts - LIVE_WINDOW) liveBuf.shift();
+    renderLive();
+  }
+}
+
+// Fill the live chart from storage so a reload doesn't wipe it.
+// SSE takes over from the newest preloaded point (dedupe via maxBufTs).
+async function preloadLive() {
+  const now = Date.now() / 1000;
+  try {
+    const r = await fetch(`/api/v1/history?start=${now - LIVE_WINDOW}&end=${now}`);
+    if (!r.ok) return;
+    const h = await r.json();
+    for (const p of h.points) {
+      if (p.t > maxBufTs) {
+        maxBufTs = p.t;
+        liveBuf.push({ t: p.t, l1: p.leg1_w, l2: p.leg2_w, tot: p.total_w });
+      }
+    }
+    renderLive();
+  } catch (_) { /* storage unavailable: SSE fills the chart from scratch */ }
 }
 
 function tickAge() {
@@ -121,6 +143,7 @@ $("ranges").addEventListener("click", (e) => {
 
 window.addEventListener("resize", () => { renderLive(); });
 fetch("/api/v1/current").then((r) => r.json()).then(onReading).catch(() => {});
+preloadLive();
 connectSSE();
 loadHistory(86400);
 setInterval(tickAge, 1000);
